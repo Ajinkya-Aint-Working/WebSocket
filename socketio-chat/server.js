@@ -1,40 +1,80 @@
 const express = require("express");
 const http = require("http");
+const path = require("path");
 const { Server } = require("socket.io");
 
 const app = express();
-const httpServer = http.createServer(app);
+const server = http.createServer(app);
 
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*"
-  }
+/**
+ * Serve static files from /public
+ */
+app.use(express.static(path.join(__dirname, "public")));
+
+/**
+ * Serve index.html at /
+ */
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-console.log("🚀 Socket.IO chat server starting...");
+/**
+ * Socket.IO setup
+ */
+const io = new Server(server, {
+  cors: { origin: "*" },
+  transports: ["websocket"], // REQUIRED for Codespaces
+});
+
+const GROUP = "general";
+const users = new Map(); // socket.id -> username
+
+console.log("🚀 Server starting...");
 
 io.on("connection", (socket) => {
-  console.log("🔌 Client connected:", socket.id);
+  console.log("🔥 SOCKET CONNECTED:", socket.id);
 
-  socket.on("join", (userId) => {
-    socket.userId = userId;
-    socket.join(userId);
-    console.log(`✅ User joined: ${userId}`);
+  socket.on("join", ({ username }) => {
+    socket.username = username;
+    socket.join(GROUP);
+    users.set(socket.id, username);
+
+    console.log(`✅ ${username} joined ${GROUP}`);
+
+    io.to(GROUP).emit("system", {
+      message: `${username} joined the chat`,
+      count: users.size,
+    });
   });
 
-  socket.on("chat", ({ to, message }) => {
-    io.to(to).emit("chat", {
-      from: socket.userId,
+  socket.on("message", ({ message }) => {
+    if (!socket.username) return;
+
+    console.log(`💬 ${socket.username}: ${message}`);
+
+    io.to(GROUP).emit("message", {
+      sender: socket.username,
       message,
-      time: new Date().toISOString()
+      count: users.size,
     });
   });
 
   socket.on("disconnect", () => {
-    console.log(`❌ Disconnected: ${socket.userId}`);
+    if (socket.username) {
+      console.log(`❌ ${socket.username} disconnected`);
+      users.delete(socket.id);
+
+      io.to(GROUP).emit("system", {
+        message: `${socket.username} left the chat`,
+        count: users.size,
+      });
+    }
   });
 });
 
-httpServer.listen(8080,"0.0.0.0", () => {
-  console.log("✅ Socket.IO server running on http://localhost:8080");
+/**
+ * IMPORTANT FOR CODESPACES
+ */
+server.listen(8080, "0.0.0.0", () => {
+  console.log("✅ Server running on port 8080");
 });
